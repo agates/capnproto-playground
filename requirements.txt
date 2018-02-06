@@ -1,0 +1,2 @@
+capnpy==0.4.1
+zeroconf==0.19.1
