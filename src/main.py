@@ -9,16 +9,16 @@ from threading import Lock
 
 from zeroconf import ServiceBrowser, Zeroconf
 
-from schema.data_pathway import DataPathway
+from schema.struct_handler_info import StructHandlerInfo
 from schema.ph_event import PhEvent
 
 
 def extract_data_pathway(info):
     try:
-        return DataPathway.loads(info.properties[b'data-pathway'])
+        return StructHandlerInfo.loads(info.properties[b"struct-handler-info"])
     except KeyError:
         raise KeyError(
-            "'data-pathway' does not exist in service properties on '{0}', {1}:{2}, {3}".format(
+            "'struct-handler-info' does not exist in service properties on '{0}', {1}:{2}, {3}".format(
                 info.name, socket.inet_ntoa(info.address), info.server, info.port
             ))
 
@@ -28,33 +28,36 @@ class Browser:
         self.capnproto_struct = capnproto_struct
         self.struct_name = bytes(capnproto_struct.__name__, "UTF-8")
 
-        # Keep an internal set for uniqueness, tuple for faster iteration
         # Lock is required because zeroconf is threaded
-        self._endpoints = tuple()
-        self._endpoints_dict = {}
-        self._endpoints_lock = Lock()
+        self.endpoints = {}
+        self.endpoints_lock = Lock()
 
-    @property
-    def endpoints(self):
-        with self._endpoints_lock:
-            return self._endpoints
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setblocking(False)
 
-    def add_endpoint(self, name, e):
-        with self._endpoints_lock:
-            self._endpoints_dict[name] = e
-            self.flatten_endpoints()
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self):
+        self.sock.close()
+
+    def add_endpoint(self, name, endpoint):
+        with self.endpoints_lock:
+            self.endpoints[name] = endpoint
 
     def remove_endpoint(self, name):
-        with self._endpoints_lock:
-            del self._endpoints_dict[name]
-            self.flatten_endpoints()
+        with self.endpoints_lock:
+            del self.endpoints[name]
 
-    def flatten_endpoints(self):
-        self._endpoints = tuple(self._endpoints_dict.values())
+    def remove_all_endpoints(self):
+        with self.endpoints_lock:
+            self.endpoints = {}
 
     def add_service(self, zeroconf, type, name):
         info = zeroconf.get_service_info(type, name)
-
         data_pathway = extract_data_pathway(info)
 
         if data_pathway.struct_name == self.struct_name:
@@ -62,6 +65,18 @@ class Browser:
 
     def remove_service(self, zeroconf, type, name):
         self.remove_endpoint(name)
+
+    def send_struct(self, capnproto_object):
+        if isinstance(capnproto_object, self.capnproto_struct):
+            data = capnproto_object.dumps()
+        else:
+            raise ValueError("Must send a capnpy struct of {0}".format(self.struct_name))
+
+        with self.endpoints_lock:
+            endpoints = self.endpoints.values()
+
+        for endpoint in endpoints:
+            self.sock.sendto(data, endpoint)
 
 
 def current_timestamp():
@@ -79,17 +94,13 @@ zeroconf = Zeroconf()
 phevent_browser = Browser(PhEvent)
 zeroconf_browser = ServiceBrowser(zeroconf, "_data-pathway._udp.local.", phevent_browser)
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
 try:
     while True:
         ph_event = PhEvent(ph=7.0, timestamp=int(round(current_timestamp_nanoseconds())))
 
         print(ph_event)
-        ph_message = ph_event.dumps()
 
-        for endpoint in phevent_browser.endpoints:
-            r = sock.sendto(ph_message, endpoint)
+        phevent_browser.send_struct(ph_event)
 
         time.sleep(1)
 except KeyboardInterrupt:
@@ -97,5 +108,5 @@ except KeyboardInterrupt:
 finally:
     zeroconf_browser.cancel()
     zeroconf.close()
-    sock.close()
+    phevent_browser.close()
     sys.exit()
