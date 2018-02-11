@@ -4,11 +4,12 @@ from datetime import datetime, timezone
 import signal
 import socket
 import sys
-import time
 from threading import Lock
+import time
 
 from zeroconf import ServiceBrowser, Zeroconf
 
+from atlasi2c import AtlasI2c
 from schema.struct_handler_info import StructHandlerInfo
 from schema.ph_event import PhEvent
 
@@ -90,23 +91,37 @@ def current_timestamp_nanoseconds():
 
 signal.signal(signal.SIGINT, signal.default_int_handler)
 
+device = AtlasI2c()
 zeroconf = Zeroconf()
 phevent_browser = Browser(PhEvent)
 zeroconf_browser = ServiceBrowser(zeroconf, "_data-pathway._udp.local.", phevent_browser)
 
 try:
+    # get the information of the board you're polling
+    info = device.query("I").split(",")[1]
+    print("Polling {} sensor every {} seconds, press ctrl-c "
+          "to stop polling".
+          format(info, device.long_timeout))
     while True:
-        ph_event = PhEvent(ph=7.0, timestamp=int(round(current_timestamp_nanoseconds())))
+        # Query the i2c device, convert the string response to a float
+        device.write("R")
+        time.sleep(device.long_timeout)
 
-        print(ph_event)
+        ph_bytes = device.read_binary()
+
+        ph_event = PhEvent(ph=ph_bytes, timestamp=int(round(current_timestamp_nanoseconds())),
+                           group_name="ph-probe-2018-02-11")
 
         phevent_browser.send_struct(ph_event)
 
-        time.sleep(1)
+        print(ph_event)
+except Exception as e:
+    print(e)
 except KeyboardInterrupt:
-    pass
+    print("Continuous polling stopped")
 finally:
     zeroconf_browser.cancel()
     zeroconf.close()
     phevent_browser.close()
+    device.close()
     sys.exit()

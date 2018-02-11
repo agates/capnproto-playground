@@ -6,7 +6,7 @@
       <sourceFolder url="file://$MODULE_DIR$/schema" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.idea" />
     </content>
-    <orderEntry type="inheritedJdk" />
+    <orderEntry type="jdk" jdkName="Remote Python 3.5.3 (sftp://agates@192.168.0.71:22/home/agates/.virtualenvs/capnproto-playground/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" name="R User Library" level="project" />
     <orderEntry type="library" name="R Skeletons" level="application" />
